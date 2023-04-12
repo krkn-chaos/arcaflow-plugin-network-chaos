@@ -2,15 +2,19 @@ import krkn_lib_kubernetes_draft
 import yaml
 import time
 import re
-from schema import *
-from cerberus import *
+import sys
+import logging
+import typing
+import krkn_lib_kubernetes_draft as krkn_lib_kubernetes
+from schema import (
+    NetworkScenarioConfig,
+    NetworkScenarioErrorOutput,
+    NetworkScenarioSuccessOutput,
+)
+from cerberus import Cerberus
 from traceback import format_exc
 from jinja2 import Environment, BaseLoader
-
-import krkn_lib_kubernetes_draft as krkn_lib_kubernetes
-import typing
 from arcaflow_plugin_sdk import plugin
-from kubernetes.client.api.core_v1_api import CoreV1Api as CoreV1Api
 
 
 def get_default_interface(
@@ -22,6 +26,9 @@ def get_default_interface(
     Function that returns a random interface from a node
 
     Args:
+        lib_k8s (krkn_lib_kubernetes.KrknLibKubernetes)
+            - Kraken kubernetes library
+
         node (string)
             - Node from which the interface is to be returned
 
@@ -29,8 +36,6 @@ def get_default_interface(
             - The YAML template used to instantiate a pod to query
               the node's interface
 
-        cli (CoreV1Api)
-            - Object to interact with Kubernetes Python client's CoreV1 API
 
     Returns:
         Default interface (string) belonging to the node
@@ -483,7 +488,8 @@ def delete_jobs(
                 pod_name = get_job_pods(lib_k8s, api_response)
                 pod_stat = lib_k8s.read_pod(name=pod_name, namespace="default")
                 logging.error(pod_stat.status.container_statuses)
-                ## TODO review the get_pod_log output (maybe it's not string even if the doc says that)
+                # TODO review the get_pod_log output
+                #  (maybe it's not string even if the doc says that)
                 pod_log_response = lib_k8s.get_pod_log(
                     name=pod_name, namespace="default"
                 )
@@ -603,6 +609,12 @@ def network_chaos(
         A 'success' or 'error' message along with their details
     """
     base_loader = BaseLoader()
+    cerberus = Cerberus(
+        cfg.krkn_exit_on_failure,
+        cfg.cerberus_enabled,
+        cfg.cerberus_url,
+        cfg.cerberus_check_application_routes,
+    )
     env = Environment(loader=base_loader)
     # TODO: load in container env the variables to be replaced in templates
     job_template = env.from_string(cfg.j2_tpl_job)
@@ -625,19 +637,8 @@ def network_chaos(
         return "error", NetworkScenarioErrorOutput(format_exc())
 
     job_list = []
-    publish = False
-    if cfg.kraken_config:
-        failed_post_scenarios = ""
-        try:
-            # TODO: kraken_config as string or pass the needed params as input
-            with open(cfg.kraken_config, "r") as f:
-                config = yaml.full_load(f)
-        except Exception:
-            logging.error(
-                "Error reading Kraken config from %s", cfg.kraken_config
-            )
-            return "error", NetworkScenarioErrorOutput(format_exc())
-        publish = True
+    failed_post_scenarios = ""
+    publish = True
 
     try:
         if cfg.execution_type == "parallel":
@@ -658,8 +659,10 @@ def network_chaos(
             end_time = int(time.time())
             if publish:
                 # TODO: define the publish_kraken_status on cerberus
-                publish_kraken_status(
-                    config, failed_post_scenarios, start_time, end_time
+                cerberus.publish_kraken_status(
+                    failed_post_scenarios,
+                    start_time,
+                    end_time,
                 )
 
         elif cfg.execution_type == "serial":
@@ -698,8 +701,10 @@ def network_chaos(
                 end_time = int(time.time())
                 if publish:
                     # TODO
-                    publish_kraken_status(
-                        config, failed_post_scenarios, start_time, end_time
+                    cerberus.publish_kraken_status(
+                        failed_post_scenarios,
+                        start_time,
+                        end_time,
                     )
                 create_interfaces = False
         else:
@@ -719,7 +724,7 @@ def network_chaos(
     finally:
         delete_virtual_interfaces(
             lib_k8s,
-            node_interface_dict.keys(),
+            list(node_interface_dict.keys()),
             pod_module_template,
         )
         logging.info("Deleting jobs(if any)")

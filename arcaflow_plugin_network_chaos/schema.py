@@ -1,8 +1,9 @@
 from dataclasses import dataclass, field
 import typing
-from arcaflow_plugin_sdk import validation, plugin
+from arcaflow_plugin_sdk import validation
 
 
+# TODO enforce typing with required fields etc
 @dataclass
 class NetworkScenarioConfig:
     node_interface_name: typing.Dict[str, typing.List[str]] = field(
@@ -80,11 +81,20 @@ class NetworkScenarioConfig:
         },
     )
 
+    kubeconfig: typing.Optional[str] = field(
+        default=None,
+        metadata={
+            "name": "Kubeconfig",
+            "description": "Kubeconfig in string format (flattened)",
+        },
+    )
+
     cerberus_enabled: typing.Optional[bool] = field(
         default=False,
         metadata={
             "name": "Cerberus Enabled",
-            "description": "if Cerberus is enabled, the plugin status will be pushed to Cerberus",
+            "description": "if Cerberus is enabled, "
+            "the plugin status will be pushed to Cerberus",
         },
     )
 
